@@ -26,7 +26,7 @@ Otherwise answer directly.
 """
 
 def run_agent(question: str):
-    # step 1: ask model
+    # Step 1: Ask the model what to do
     response = client.responses.create(
         model="gpt-4.1-mini",
         tools=[
@@ -36,7 +36,10 @@ def run_agent(question: str):
                 "description": "Search the web",
                 "parameters": {
                     "type": "object",
-                    "properties": {"query": {"type": "string"}}
+                    "properties": {
+                        "query": {"type": "string"}
+                    },
+                    "required": ["query"]
                 },
             },
             {
@@ -45,7 +48,10 @@ def run_agent(question: str):
                 "description": "Wikipedia lookup",
                 "parameters": {
                     "type": "object",
-                    "properties": {"query": {"type": "string"}}
+                    "properties": {
+                        "query": {"type": "string"}
+                    },
+                    "required": ["query"]
                 },
             },
             {
@@ -54,7 +60,10 @@ def run_agent(question: str):
                 "description": "Save notes",
                 "parameters": {
                     "type": "object",
-                    "properties": {"text": {"type": "string"}}
+                    "properties": {
+                        "text": {"type": "string"}
+                    },
+                    "required": ["text"]
                 },
             },
         ],
@@ -63,30 +72,75 @@ def run_agent(question: str):
             {"role": "user", "content": question},
         ],
     )
-    output = response.output[0]
 
-    # step 2: check if tool was called
-    if output.type == "function_call":
-        tool_name = output.name
-        tool_args = json.loads(output.arguments)
+    # Step 2: Check whether the model called a tool
+    tool_call = None
 
-        # run the tool in Python
-        tool_result = TOOLS[tool_name](**tool_args)
+    for output in response.output:
+        if output.type == "function_call":
+            tool_call = output
+            break
 
-        # Step 3: send tool result back to model
-        second_response = client.responses.create(
-            model="gpt-4.1-mini",
-            input=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": question},
-                {
-                    "role": "tool",
-                    "name": tool_name,
-                    "content": str(tool_result),
+    # No tool needed
+    if tool_call is None:
+        return response.output_text
+
+    # Step 3: Run the tool ourselves
+    tool_name = tool_call.name
+    tool_args = json.loads(tool_call.arguments)
+
+    tool_result = TOOLS[tool_name](**tool_args)
+
+    # Step 4: Give the tool result back to the model
+    second_response = client.responses.create(
+        model="gpt-4.1-mini",
+        tools=[
+            {
+                "type": "function",
+                "name": "search_tool",
+                "description": "Search the web",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"}
+                    },
+                    "required": ["query"]
                 },
-            ],
-        )
-        return second_response.output_text
+            },
+            {
+                "type": "function",
+                "name": "wiki_tool",
+                "description": "Wikipedia lookup",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"}
+                    },
+                    "required": ["query"]
+                },
+            },
+            {
+                "type": "function",
+                "name": "save_tool",
+                "description": "Save notes",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string"}
+                    },
+                    "required": ["text"]
+                },
+            },
+        ],
+        input=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": question},
+            {
+                "type": "function_call_output",
+                "call_id": tool_call.call_id,
+                "output": str(tool_result),
+            },
+        ],
+    )
 
-    # no tool used -> direct answer
-    return response.output_text
+    return second_response.output_text
