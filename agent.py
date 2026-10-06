@@ -1,146 +1,54 @@
+import asyncio
 from dotenv import load_dotenv
-from openai import OpenAI
-import json
-
-from tools import search_tool, wiki_tool, save_tool
+from agents import Agent, Runner, function_tool
+from tools import add_purchase, get_purchases, search_products
 
 load_dotenv()
-client = OpenAI()
 
-TOOLS = {
-    "search_tool": search_tool,
-    "wiki_tool": wiki_tool,
-    "save_tool": save_tool,
-}
+@function_tool
+def save_purchase(product: str, price: float, store: str):
+    """Save a purchase to the user's purchase history."""
+    return add_purchase(product, price, store)
 
-SYSTEM_PROMPT = """
-You are a research assistant.
 
-You can use tools:
-- search_tool(query)
-- wiki_tool(query)
-- save_tool(text)
+@function_tool
+def view_purchases():
+    """View the user's previous purchases."""
+    return get_purchases()
 
-If you need a tool, call it.
-Otherwise answer directly.
-"""
 
-def run_agent(question: str):
-    # Step 1: Ask the model what to do
-    response = client.responses.create(
-        model="gpt-4.1-mini",
-        tools=[
-            {
-                "type": "function",
-                "name": "search_tool",
-                "description": "Search the web",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string"}
-                    },
-                    "required": ["query"]
-                },
-            },
-            {
-                "type": "function",
-                "name": "wiki_tool",
-                "description": "Wikipedia lookup",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string"}
-                    },
-                    "required": ["query"]
-                },
-            },
-            {
-                "type": "function",
-                "name": "save_tool",
-                "description": "Save notes",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "text": {"type": "string"}
-                    },
-                    "required": ["text"]
-                },
-            },
-        ],
-        input=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": question},
-        ],
+@function_tool
+def find_products(query: str):
+    """Search for real products and prices."""
+    return search_products(query)
+
+
+shopping_agent = Agent(
+    name="Shopping Assistant",
+    instructions="""
+    You are a personal shopping assistant.
+
+    You can save purchases and view the user's purchase history.
+
+    When the user tells you about something they purchased, save it.
+    When the user asks about their purchase history, view their purchases.
+
+    Before recommending a product, view their purchases and use that history when it is relevant.
+
+    Be concise and helpful.
+    """,
+    tools=[save_purchase, view_purchases, find_products],
+)
+
+
+async def main():
+    result = await Runner.run(
+        shopping_agent,
+        "Find me Nike running shoes under $100.",
     )
 
-    # Step 2: Check whether the model called a tool
-    tool_call = None
+    print(result.final_output)
 
-    for output in response.output:
-        if output.type == "function_call":
-            tool_call = output
-            break
 
-    # No tool needed
-    if tool_call is None:
-        return response.output_text
-
-    # Step 3: Run the tool ourselves
-    tool_name = tool_call.name
-    tool_args = json.loads(tool_call.arguments)
-
-    tool_result = TOOLS[tool_name](**tool_args)
-
-    # Step 4: Give the tool result back to the model
-    second_response = client.responses.create(
-        model="gpt-4.1-mini",
-        tools=[
-            {
-                "type": "function",
-                "name": "search_tool",
-                "description": "Search the web",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string"}
-                    },
-                    "required": ["query"]
-                },
-            },
-            {
-                "type": "function",
-                "name": "wiki_tool",
-                "description": "Wikipedia lookup",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string"}
-                    },
-                    "required": ["query"]
-                },
-            },
-            {
-                "type": "function",
-                "name": "save_tool",
-                "description": "Save notes",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "text": {"type": "string"}
-                    },
-                    "required": ["text"]
-                },
-            },
-        ],
-        input=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": question},
-            {
-                "type": "function_call_output",
-                "call_id": tool_call.call_id,
-                "output": str(tool_result),
-            },
-        ],
-    )
-
-    return second_response.output_text
+if __name__ == "__main__":
+    asyncio.run(main())
