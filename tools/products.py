@@ -1,33 +1,12 @@
-import json
 import os
 import serpapi
 from dotenv import load_dotenv
 
 load_dotenv()
 
-purchases = []
-
-def add_purchase(product: str, price: float, store: str):
-    purchase = {
-        "product": product,
-        "price": price,
-        "store": store,
-    }
-
-    purchases.append(purchase)
-
-    return {
-        "success": True,
-        "purchase": purchase,
-    }
-
-
-def get_purchases():
-    with open("purchases.json", "r") as f:
-        return json.load(f)
-
 
 def search_products(query: str):
+    """Search Google Shopping and return a few current products."""
     client = serpapi.Client(
         api_key=os.getenv("SERPAPI_KEY")
     )
